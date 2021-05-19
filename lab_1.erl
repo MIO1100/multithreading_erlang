@@ -1,135 +1,158 @@
 -module(lab_1).
 -compile(export_all).
 
-firm() ->
+manager() ->
 
   receive
      done ->
-       io:format("Firm: done~n");
+       io:format("Manager: done\n");
      orderRequest ->
+       pingLoop(pang,'pidBox'),
+       io:format("Manager: new client! send order to the box_office\n"),
+       resolvePid(pidBox) ! get_order,
+       manager();
+    give_dish ->
        pingLoop(pang,'pidClient'),
-       io:format("Firm: new client! new invoice"),
-       resolvePid(pidClient) ! invoice,
-       firm();
+       io:format("Manager: i get a dish, give to the client and wait for payment\n"),
+       resolvePid(pidClient) ! give_dish,
+       manager();
      paymentReceived ->
+       pingLoop(pang, 'pidBox'),
+       io:format("Manager: payment recieved!\n"),
+       resolvePid(pidBox) ! payment,
+       manager();
+    paymentNotify ->
        pingLoop(pang, 'pidClient'),
-       io:format("Firm: payment recieved!"),
-       resolvePid(pidClient) ! cargoRequest,
-       firm();
-     cargoToFirm ->
-       pingLoop(pang, 'pidProvider'),
-       io:format("Firm: ordering truck!"),
-       resolvePid(pidProvider) ! truckRequest,
-       firm();
-     truckFound ->
-       pingLoop(pang, 'pidProvider'),
-       io:format("Firm: truck found, sending!"),
-       resolvePid(pidProvider) ! cargoToProvider,
-       firm();
+       io:format("Manager: payment well done!\n"),
+       resolvePid(pidClient) ! notify,
+       manager();
      orderFinished ->
-       io:format("Firm: well done!"),
-       firm()
+       io:format("Manager: well done!\n"),
+       manager()
 end.
  
-bank() ->
+box_office() ->
 
   receive
      done ->
-       io:format("Bank: done~n");
+       io:format("box_office: done\n");
+    get_order ->
+        io:format("box_office: i get an order and send to the cook\n"),
+        pingLoop(pang, 'pidCook'),
+        resolvePid(pidCook) ! get_order;
      payment ->
-       pingLoop(pang,'pidFirm'),
-       io:format("Bank: payment received, sending message to firm"),
-     resolvePid(pidFirm) ! paymentReceived
+       pingLoop(pang,'pidManager'),
+       io:format("box_office: payment received, sending message to manager\n"),
+     resolvePid(pidManager) ! paymentNotify
    end,
-bank().
+box_office().
  
-receiver() ->
+ 
+cook() ->
 
   receive
      done ->
-       io:format("Receiver: done");
-     cargoDone->
-       io:format("Receiver: it's here!"),
-       pingLoop(pang, 'pidClient'),
-       io:format("Receiver: notify client!"),
-       resolvePid(pidClient) ! jobDone,
-       pingLoop(pang, 'pidFirm'),
-       io:format("Receiver: notify firm!"),
-       resolvePid(pidFirm) ! orderFinished,
-       receiver()
-  end.
- 
-provider() ->
+       io:format("cook: done\n");
+    get_order ->
+        io:format("cook: get an order \n"),
+        pingLoop(pang, 'pidWarehouse'),
+        resolvePid(pidWarehouse) ! request_ingredients;
+    give_ingredients ->
+        io:format("cook: send dish to the manager\n"),
+        pingLoop(pang, 'pidManager'),
+        resolvePid(pidManager) ! give_dish
+   end,
+cook().
+
+warehouse() ->
 
   receive
      done ->
-       io:format("Provider: done");
-     truckRequest ->
-       pingLoop(pang, 'pidFirm'),
-       io:format("Provider: looking for a truck... done!"),
-       resolvePid(pidFirm) ! truckFound,
-       provider();
-     cargoToProvider ->
-       pingLoop(pang, 'pidReceiver'),
-       io:format("Provider: cargo received, truck sent"),
-       resolvePid(pidReceiver)!cargoDone,
-       provider()
+       io:format("warehouse: done\n");
+    request_ingredients ->
+        io:format("warehouse: get a request\n"),
+        pingLoop(pang, 'pidDelivery'),
+        resolvePid(pidDelivery) ! get_ingredients;
+    jobDone -> 
+        io:format("warehouse: i have an ingredients\n"),
+        pingLoop(pang, 'pidCook'),
+        resolvePid(pidCook) ! give_ingredients
+   end,
+warehouse().
+
+delivery() ->
+
+  receive
+     done ->
+       io:format("Delivery: done\n");
+     get_ingredients->
+       io:format("Delivery: i get a order!\n"),
+       pingLoop(pang, 'pidWarehouse'),
+       io:format("Delivery: i send ingredients\n"),
+       resolvePid(pidWarehouse) ! jobDone,
+       delivery()
   end.
+ 
+
 client(0, _) ->
-  io:format("Client: finally done!"),
-  pingLoop(pang, 'pidFirm'),
-  resolvePid(pidFirm) ! done,
-  pingLoop(pang, 'pidBank'),
-  resolvePid(pidBank) ! done,
-  pingLoop(pang, 'pidProvider'),
-  resolvePid(pidProvider)!done,
-  pingLoop(pang, 'pidReceiver'),
-  resolvePid(pidReceiver) ! done;
+  io:format("Client: finally done!\n"),
+  pingLoop(pang, 'pidManager'),
+  resolvePid(pidManager) ! done,
+  
+  pingLoop(pang, 'pidBox'),
+  resolvePid(pidBox) ! done,
+  
+    pingLoop(pang, 'pidCook'),
+  resolvePid(pidCook) ! done,
+  
+  pingLoop(pang, 'pidWarehouse'),
+  resolvePid(pidWarehouse) ! done,
+  
+  pingLoop(pang, 'pidDelivery'),
+  resolvePid(pidDelivery)!done;
+  
 client(Index, 0) ->
 
-     pingLoop(pang, 'pidFirm'),
-     io:format("Client: new client!"),
-     resolvePid(pidFirm) ! orderRequest,
+     pingLoop(pang, 'pidManager'),
+     io:format("Client: new client!\n"),
+     resolvePid(pidManager) ! orderRequest,
      client(Index, 1);
+     
 client(Index,1) ->
-
   receive
-     invoice ->
-       pingLoop(pang,'pidBank'),
-       io:format("Client: invoice received, ready to pay"),
-       resolvePid(pidBank) ! payment,
+    give_dish ->
+       pingLoop(pang,'pidManager'),
+       io:format("Client: i get a dish\n"),
+       resolvePid(pidManager) ! paymentReceived,
        client(Index, 1);
-     cargoRequest ->
-       pingLoop(pang, 'pidFirm'),
-       io:format("Client: sending cargo to firm"),
-       resolvePid(pidFirm) ! cargoToFirm,
-       client(Index, 1);
-     jobDone ->
-       io:format("Client: order complete"),
-       client(Index - 1, 0)
-  end.
 
+    notify ->
+       io:format("Client: order complete\n\n"),
+        client(Index - 1, 0)
+  end.
   
-runFirmNode() ->
-  global:register_name(pidFirm, spawn(lab_1, firm,[])).
+runManagerNode() ->
+  global:register_name(pidManager, spawn(lab_1, manager,[])).
  
-runBankNode() ->
-  global:register_name(pidBank, spawn(lab_1, bank,[])).
+runBox_officeNode() ->
+  global:register_name(pidBox, spawn(lab_1, box_office,[])).
  
+runCookNode() ->
+  global:register_name(pidCook, spawn(lab_1, cook,[])).
+ 
+runWarehouseNode() ->
+  global:register_name(pidWarehouse, spawn(lab_1, warehouse,[])).
+  
+runDeliveryNode() ->
+  global:register_name(pidDelivery, spawn(lab_1, delivery,[])). 
+
 runClientNode(N) ->
   global:register_name(pidClient, spawn(lab_1,client, [N, 0])).
  
-runReceiverNode() ->
-  global:register_name(pidReceiver, spawn(lab_1, receiver,[])).
- 
-runProviderNode() ->
-  global:register_name(pidProvider, spawn(lab_1, provider, [])).
 %% ==============================================
 %% Internal functions
 %% =================================================
 resolvePid(Atom) ->
-
-  %io:format("Pid ~n",[string:concat(erlang:atom_to_list(Atom), "@127.0.0.1")]),
   global:whereis_name(Atom).
  
 buildNodeAddress(Atom) ->
@@ -137,7 +160,6 @@ buildNodeAddress(Atom) ->
     list_to_atom(string:concat(erlang:atom_to_list(Atom), "@192.168.1.6")).
  
 pingLoop(pong, NodeName) ->
-  %io:format("node ~s registered  ~n",[NodeName]), 
   checkNodeByName(resolvePid(NodeName), NodeName),
   pingOK;
   
@@ -147,6 +169,6 @@ pingLoop(pang, NodeName) ->
  
 checkNodeByName(undefined, NodeName) ->
   pingLoop(pang, NodeName);
+  
 checkNodeByName(_, _) ->
-  %io:format("node ~s registered  ~n",[NodeName]),
   checkOK.
